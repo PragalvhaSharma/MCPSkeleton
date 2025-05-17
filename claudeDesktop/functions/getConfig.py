@@ -1,319 +1,209 @@
-import json
-import re
 import requests
+import re
+import json
+import urllib.parse
 
-def convert_github_url_to_raw(github_url):
+def getConfig(github_url):
     """
-    Convert a GitHub repository URL to its raw README URL.
+    Extract mcpServers configuration from a GitHub repository README.
     
     Args:
-        github_url (str): GitHub repository URL
-        
-    Returns:
-        str: URL to the raw README.md file
-    """
-    # Remove trailing slash if present
-    github_url = github_url.rstrip('/')
-    
-    # Check if URL points to a subdirectory
-    if '/tree/' in github_url:
-        # Extract path components from URL with subdirectory
-        pattern = r'https://github.com/([^/]+)/([^/]+)/tree/([^/]+)/(.*)'
-        match = re.match(pattern, github_url)
-        
-        if match:
-            owner, repo, branch, path = match.groups()
-            # Construct the raw URL for the README.md file in the subdirectory
-            raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}/README.md"
-            
-            # Check if the README exists
-            response = requests.head(raw_url)
-            if response.status_code == 200:
-                return raw_url
-    else:
-        # Extract owner and repo from the URL (original behavior for repo root)
-        pattern = r'https://github.com/([^/]+)/([^/]+)'
-        match = re.match(pattern, github_url)
-        
-        if match:
-            owner, repo = match.groups()
-            # Construct the raw URL for the README.md file
-            raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/main/README.md"
-            
-            # First try main branch
-            response = requests.head(raw_url)
-            if response.status_code == 200:
-                return raw_url
-                
-            # If main doesn't exist, try master branch
-            raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/master/README.md"
-            response = requests.head(raw_url)
-            if response.status_code == 200:
-                return raw_url
-    
-    # If we can't determine the raw URL, return the original URL
-    return github_url
-
-def get_mcp_config(url_or_config):
-    """
-    Function to retrieve and extract MCP Server configuration from a README or direct JSON.
-    
-    Args:
-        url_or_config (str): URL to the GitHub repository or direct JSON string
-        
-    Returns:
-        dict: The extracted MCP configuration as a dictionary.
-    """
-    try:
-        # Check if input is already a valid JSON string
-        try:
-            config = json.loads(url_or_config)
-            # If it's already a valid JSON, check if it's an MCP configuration
-            if "mcpServers" in config:
-                return config
-            elif "mcp" in config and "servers" in config["mcp"]:
-                # Convert to the format our application expects
-                return {
-                    "mcpServers": config["mcp"]["servers"]
-                }
-            return {"error": "Valid JSON but no MCP configuration found"}
-        except json.JSONDecodeError:
-            # Not valid JSON, continue with URL processing
-            pass
-        
-        # Check if it's a local file path
-        if url_or_config.startswith('./') or url_or_config.startswith('/') or ':' not in url_or_config:
-            try:
-                with open(url_or_config, 'r') as f:
-                    config = json.load(f)
-                    if "mcpServers" in config:
-                        return config
-                    elif "mcp" in config and "servers" in config["mcp"]:
-                        return {
-                            "mcpServers": config["mcp"]["servers"]
-                        }
-                return {"error": "No MCP configuration found in local file"}
-            except (FileNotFoundError, json.JSONDecodeError):
-                # Not a valid local file or contains invalid JSON
-                pass
-        
-        # Assume it's a GitHub URL and proceed with the original logic
-        # Convert GitHub URL to raw README URL
-        raw_url = convert_github_url_to_raw(url_or_config)
-        
-        # Fetch the README from the raw URL
-        response = requests.get(raw_url)
-        readme_text = response.text
-        
-        # Find all code blocks that might contain JSON configuration
-        json_blocks = re.findall(r'```(?:json)?\s*(\{[^`]*\})\s*```', readme_text, re.DOTALL)
-        
-        # Look for MCP configurations in all found blocks
-        for block in json_blocks:
-            # Clean up the block (remove potential markdown artifacts)
-            clean_block = block.strip()
-            
-            try:
-                # Try to parse as JSON
-                config = json.loads(clean_block)
-                
-                # Check if it's an MCP configuration - check both formats
-                if "mcpServers" in config:
-                    return config
-                elif "mcp" in config and "servers" in config["mcp"]:
-                    # Convert to the format our application expects
-                    return {
-                        "mcpServers": config["mcp"]["servers"]
-                    }
-                    
-            except json.JSONDecodeError:
-                continue
-        
-        # If we get here, we didn't find a valid MCP configuration in code blocks
-        # Try to find any JSON objects that contain either format
-        patterns = [
-            r'\{\s*"mcpServers"\s*:\s*\{[^{}]*(?:\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}[^{}]*)*\}\s*\}',
-            r'\{\s*"mcp"\s*:\s*\{\s*"servers"\s*:\s*\{[^{}]*(?:\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}[^{}]*)*\}\s*\}\s*\}'
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, readme_text, re.DOTALL)
-            if match:
-                try:
-                    config = json.loads(match.group(0))
-                    # Check which format it is and normalize
-                    if "mcpServers" in config:
-                        return config
-                    elif "mcp" in config and "servers" in config["mcp"]:
-                        return {
-                            "mcpServers": config["mcp"]["servers"]
-                        }
-                except json.JSONDecodeError:
-                    pass
-                
-        # Fall back to a default configuration
-        return {"error": "No MCP configuration found in README"}
-            
-    except requests.RequestException as e:
-        return {"error": f"Failed to fetch README: {str(e)}"}
-    except Exception as e:
-        return {"error": f"Unexpected error: {str(e)}"}
-
-def extract_specific_server_config(config_source, server_name):
-    """
-    Extract configuration for a specific server from the config source.
-    
-    Args:
-        config_source (str): URL to the GitHub repository, path to file, or JSON string
-        server_name (str): Name of the server to extract config for
-        
-    Returns:
-        dict: The extracted configuration for the specific server
-    """
-    full_config = get_mcp_config(config_source)
-    
-    if "error" in full_config:
-        return full_config
-        
-    if "mcpServers" in full_config and server_name in full_config["mcpServers"]:
-        return {
-            "mcpServers": {
-                server_name: full_config["mcpServers"][server_name]
-            }
-        }
-    else:
-        return {"error": f"Server '{server_name}' not found in the configuration"}
-
-def update_server_config_file(config_file_path, config_source, server_name=None):
-    """
-    Update the server_config.json file with configurations from a source.
-    
-    Args:
-        config_file_path (str): Path to the server_config.json file
-        config_source (str): URL to the GitHub repository, path to file, or JSON string
-        server_name (str, optional): Name of the specific server to extract.
-                                    If None, all servers are extracted.
+        github_url: URL to a GitHub repository
     
     Returns:
-        dict: The updated configuration or an error message
+        dict: The mcpServers configuration extracted from the README
     """
-    try:
-        # Get the configuration from the source
-        if server_name:
-            new_config = extract_specific_server_config(config_source, server_name)
-        else:
-            new_config = get_mcp_config(config_source)
-        
-        # Check if there was an error getting the config
-        if "error" in new_config:
-            return new_config
-        
-        # Read the existing config file
-        try:
-            with open(config_file_path, 'r') as f:
-                existing_config = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            # If file doesn't exist or is invalid, create a new one with default structure
-            existing_config = {"mcpServers": {}}
-        
-        # Handle different config formats
-        if "mcpServers" not in existing_config:
-            # Convert from mcp.servers format if needed
-            if "mcp" in existing_config and "servers" in existing_config["mcp"]:
-                existing_config = {"mcpServers": existing_config["mcp"]["servers"]}
+    # Clean up and parse GitHub URL to get the repository path
+    # Remove any query parameters or fragments
+    cleaned_url = github_url.split('?')[0].split('#')[0]
+    
+    # Handle direct raw GitHub URLs
+    if "raw.githubusercontent.com" in cleaned_url:
+        # Extract repo owner, repo name, and branch from raw URL
+        parts = re.match(r"https://raw.githubusercontent.com/([^/]+)/([^/]+)/([^/]+)/(.+)", cleaned_url)
+        if parts:
+            owner, repo, branch, path = parts.groups()
+            repo_path = f"{owner}/{repo}"
+            branch_name = branch
+            
+            # If the path ends with README.md, use it directly
+            if path.endswith("README.md"):
+                readme_path = path
+                raw_readme_url = cleaned_url
             else:
-                # Create the structure if it doesn't exist
-                existing_config = {"mcpServers": {}}
-        
-        # Merge the new configuration with the existing one
-        if "mcpServers" in new_config:
-            for server, config in new_config["mcpServers"].items():
-                existing_config["mcpServers"][server] = config
-        
-        # Write the updated configuration back to the file
-        with open(config_file_path, 'w') as f:
-            json.dump(existing_config, f, indent=4, sort_keys=False)
-        
-        return {"success": True, "message": f"Server configuration successfully updated with {len(new_config.get('mcpServers', {}))} servers"}
-    
-    except FileNotFoundError:
-        return {"error": f"Config file not found: {config_file_path}"}
-    except json.JSONDecodeError:
-        return {"error": "Invalid JSON in the configuration file"}
-    except Exception as e:
-        return {"error": f"Failed to update configuration: {str(e)}"}
-
-# Example usage
-if __name__ == "__main__":
-    # Example: Get MCP configuration from the specified repo
-    repo_url = "https://github.com/githejie/mcp-server-calculator"
-    print(f"Converting URL: {repo_url}")
-    raw_url = convert_github_url_to_raw(repo_url)
-    print(f"Raw URL: {raw_url}")
-    
-    # Test with the hardcoded example first
-    test_json = """
-    {
-      "mcp": {
-        "servers": {
-          "git": {
-            "command": "uvx",
-            "args": ["mcp-server-git"]
-          }
-        }
-      }
-    }
-    """
-    
-    print("Testing with hardcoded JSON:")
-    try:
-        config = json.loads(test_json)
-        if "mcp" in config and "servers" in config["mcp"]:
-            normalized_config = {
-                "mcpServers": config["mcp"]["servers"]
-            }
-            print(json.dumps(normalized_config, indent=2))
+                # Assume we need to append README.md to the path
+                readme_path = f"{path}/README.md" if path else "README.md"
+                readme_path = readme_path.lstrip('/')
+                raw_readme_url = f"https://raw.githubusercontent.com/{repo_path}/{branch_name}/{readme_path}"
+            
+            print(f"Using Raw GitHub URL: {raw_readme_url}")
         else:
-            print("No MCP configuration found in test JSON")
-    except json.JSONDecodeError as e:
-        print(f"Error parsing test JSON: {e}")
+            print(f"Invalid raw GitHub URL: {github_url}")
+            return {"mcpServers": {}}
     
-    # Then try to get from the repo
-    print("\nTrying to get config from repository:")
-    config = get_mcp_config(repo_url)
-    print("MCP configuration from repository:")
+    # Handle GitHub tree URLs
+    elif "/tree/" in cleaned_url:
+        # Extract repo owner, repo name, and branch
+        parts = re.match(r"https://github.com/([^/]+)/([^/]+)/tree/([^/]+)/?(.+)?", cleaned_url)
+        if parts:
+            owner, repo, branch, extra_path = parts.groups()
+            repo_path = f"{owner}/{repo}"
+            branch_name = branch
+            subdir = extra_path.lstrip('/') if extra_path else ""
+            
+            # Construct the path to the README.md file
+            readme_path = f"{subdir}/README.md" if subdir else "README.md"
+            readme_path = readme_path.lstrip('/')
+            raw_readme_url = f"https://raw.githubusercontent.com/{repo_path}/{branch_name}/{readme_path}"
+            
+            print(f"Constructed Raw README URL from tree URL: {raw_readme_url}")
+        else:
+            print(f"Invalid GitHub repository URL with tree path: {github_url}")
+            return {"mcpServers": {}}
+    
+    # Handle standard GitHub repository URLs
+    else:
+        repo_path = cleaned_url.replace("https://github.com/", "").rstrip('/')
+        branch_name = "main"  # Default branch to try first
+        
+        # Handle case where URL might be malformed
+        if not repo_path or '/' not in repo_path:
+            print(f"Invalid GitHub repository URL: {github_url}")
+            return {"mcpServers": {}}
+            
+        readme_path = "README.md"
+        raw_readme_url = f"https://raw.githubusercontent.com/{repo_path}/{branch_name}/{readme_path}"
+        print(f"Trying Raw README URL: {raw_readme_url}")
+    
+    try:
+        # Fetch the README content
+        response = requests.get(raw_readme_url)
+        response.raise_for_status()
+        readme_content = response.text
+    except requests.exceptions.HTTPError:
+        # If we're not already using an alternative branch, try another one
+        if "raw.githubusercontent.com" in cleaned_url:
+            print(f"Error fetching README directly from raw URL: {raw_readme_url}")
+            return {"mcpServers": {}}
+            
+        # Try fallback branch
+        if branch_name != "main":
+            fallback_branch = "main"
+        else:
+            fallback_branch = "master"
+            
+        raw_readme_url = f"https://raw.githubusercontent.com/{repo_path}/{fallback_branch}/{readme_path}"
+        print(f"{branch_name} branch not found. Trying: {raw_readme_url}")
+        try:
+            response = requests.get(raw_readme_url)
+            response.raise_for_status()
+            readme_content = response.text
+        except Exception as e:
+            print(f"Error fetching README from both {branch_name} and {fallback_branch} branches: {str(e)}")
+            return {"mcpServers": {}}
+    except Exception as e:
+        print(f"Error fetching or parsing README: {str(e)}")
+        return {"mcpServers": {}}
+    
+    # First look for code blocks that might contain complete JSON configurations
+    json_code_blocks = re.findall(r'```(?:json)?\s*\n(\{\s*"mcpServers"\s*:[\s\S]*?)\n```', readme_content)
+    
+    if json_code_blocks:
+        for block in json_code_blocks:
+            try:
+                # Try to parse the JSON code block directly
+                config = json.loads(block)
+                if "mcpServers" in config and isinstance(config["mcpServers"], dict):
+                    print(f"Found mcpServers configuration in code block")
+                    return config
+            except json.JSONDecodeError:
+                # Clean up the block and try again
+                try:
+                    # Remove comments
+                    clean_block = re.sub(r'(?m)^\s*//.*\n?', '', block)
+                    # Ensure it's properly formatted
+                    if not clean_block.strip().startswith('{'):
+                        clean_block = '{' + clean_block + '}'
+                    config = json.loads(clean_block)
+                    if "mcpServers" in config and isinstance(config["mcpServers"], dict):
+                        print(f"Found mcpServers configuration in cleaned code block")
+                        return config
+                except:
+                    continue
+    
+    # If we couldn't find a valid JSON configuration in code blocks,
+    # fallback to server-specific pattern matching
+    # Look for configs for any MCP server (not just "git")
+    server_pattern = r'"([^"]+)"\s*:\s*\{\s*"command"\s*:\s*"([^"]+)",\s*"args"\s*:\s*\[(.*?)\]\s*\}'
+    server_matches = re.findall(server_pattern, readme_content)
+    
+    if server_matches:
+        config = {"mcpServers": {}}
+        for match in server_matches:
+            server_name, command, args_str = match
+            config["mcpServers"][server_name] = {
+                "command": command,
+                "args": []
+            }
+            
+            # Parse args if they exist
+            if args_str:
+                args_str = args_str.replace("'", '"')
+                try:
+                    # Try to parse as a JSON array
+                    args = json.loads('[' + args_str + ']')
+                    config["mcpServers"][server_name]["args"] = args
+                except:
+                    # Try simple string splitting
+                    args = [arg.strip().strip('"\'') for arg in args_str.split(',')]
+                    config["mcpServers"][server_name]["args"] = args
+        
+        print(f"Extracted configuration for {len(config['mcpServers'])} MCP servers")
+        return config
+    
+    # Last resort: try to find an entire mcpServers block
+    mcpserver_block = re.search(r'{\s*"mcpServers"\s*:\s*{[^{}]*{[^{}]*}[^{}]*}\s*}', readme_content)
+    if mcpserver_block:
+        try:
+            # Try to parse the entire block
+            config = json.loads(mcpserver_block.group(0))
+            print(f"Found complete mcpServers block")
+            return config
+        except json.JSONDecodeError:
+            pass
+    
+    # If all else fails, return empty configuration
+    print("Could not extract mcpServers configuration from README")
+    return {"mcpServers": {}}
+
+if __name__ == "__main__":
+    import sys
+    
+    if len(sys.argv) > 1:
+        github_url = sys.argv[1]
+    else:
+        github_url = input("Enter GitHub repository URL: ")
+    
+    # For testing with direct content
+    if github_url.startswith("{") or "mcpServers" in github_url:
+        # Parse direct JSON input
+        try:
+            config = json.loads(github_url)
+            print(json.dumps(config, indent=2))
+            sys.exit(0)
+        except:
+            readme_content = github_url
+            # Extract configuration manually
+            pattern = r'"mcpServers"\s*:\s*\{(.+?)\}'
+            matches = re.findall(pattern, readme_content, re.DOTALL)
+            if matches:
+                config_str = '{"mcpServers": {' + matches[0] + '}}'
+                try:
+                    config = json.loads(config_str)
+                    print(json.dumps(config, indent=2))
+                    sys.exit(0)
+                except:
+                    pass
+    
+    config = getConfig(github_url)
     print(json.dumps(config, indent=2))
-    
-    # Example: Use direct JSON string as input
-    direct_json = """{
-      "mcpServers": {
-        "everything": {
-          "command": "npx",
-          "args": [
-            "-y",
-            "@modelcontextprotocol/server-everything"
-          ]
-        }
-      }
-    }"""
-    
-    print("\nTrying to process direct JSON input:")
-    config = get_mcp_config(direct_json)
-    print("MCP configuration from direct JSON:")
-    print(json.dumps(config, indent=2))
-    
-    # Example: Create a config file
-    print("\nCreating a sample config file:")
-    with open("sample_config.json", "w") as f:
-        f.write(direct_json)
-    
-    # Example: Read from a local file
-    print("\nReading from local file:")
-    config = get_mcp_config("sample_config.json")
-    print("MCP configuration from local file:")
-    print(json.dumps(config, indent=2))
-    
-    # Example: Update a config file with a specific server
-    print("\nUpdating config file with a specific server:")
-    result = update_server_config_file("server_config.json", direct_json, "everything")
-    print(result)

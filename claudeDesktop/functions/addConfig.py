@@ -11,7 +11,8 @@ def update_server_config(new_config_data):
     Returns:
         bool: True if update was successful, False otherwise
     """
-    config_path = "/Users/pragalvhasharma/.cursor/mcp.json"
+    # Use the local server_config.json in the project root
+    config_path = "server_config.json"
     
     try:
         # Read the existing config
