@@ -1,0 +1,28 @@
+{
+    "mcpServers": {
+        
+        "filesystem": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@modelcontextprotocol/server-filesystem",
+                "/Users/pragalvhasharma/Downloads/PragGOToDocuments/Blanc/school/mcpServers/McpSkeleton/claudeDesktop"
+            ]
+        },
+        
+        "research": {
+            "command": "uv",
+            "args": [
+                "--directory",
+                "/Users/pragalvhasharma/Downloads/PragGOToDocuments/Blanc/school/mcpServers/McpSkeleton/claudeDesktop",
+                "run",
+                "research_server.py"
+            ]
+        },
+        
+        "fetch": {
+            "command": "uvx",
+            "args": ["mcp-server-fetch"]
+        }
+    }
+}
