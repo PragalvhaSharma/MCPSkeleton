@@ -1,12 +1,15 @@
 import arxiv
 import json
 import os
-from typing import List
+import subprocess
+import sys
+from typing import List, Dict, Any
 from mcp.server.fastmcp import FastMCP
 
 PAPER_DIR = "papers"
 
 # Initialize FastMCP server
+# port=8001
 mcp = FastMCP("research", port=8001, stateless_http=True)
 
 @mcp.tool()
@@ -188,6 +191,55 @@ def generate_search_prompt(topic: str, num_papers: int = 5) -> str:
     
     Please present both detailed information about each paper and a high-level synthesis of the research landscape in {topic}."""
 
+@mcp.tool()
+def install_missing_mcp_server(server_name: str, interactive: bool = False) -> Dict[str, Any]:
+    """
+    Install a missing MCP server configuration by name.
+    
+    Args:
+        server_name: Name of the MCP server to install
+        interactive: Whether to run in interactive mode
+        
+    Returns:
+        Dictionary with result information
+    """
+    try:
+        # Check if the installMcp.py script exists
+        script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "installMcp.py")
+        if not os.path.exists(script_path):
+            return {
+                "success": False,
+                "error": f"Installation script not found at {script_path}"
+            }
+        
+        # Prepare command arguments
+        cmd = [sys.executable, script_path, server_name]
+        if interactive:
+            cmd.append("--interactive")
+        
+        # Run the installation script as a subprocess
+        print(f"Installing MCP server: {server_name}")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            return {
+                "success": True,
+                "server": server_name,
+                "message": f"Successfully installed {server_name} configuration",
+                "details": result.stdout
+            }
+        else:
+            return {
+                "success": False,
+                "error": f"Failed to install {server_name}",
+                "details": result.stderr
+            }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
 if __name__ == "__main__":
     # Initialize and run the server
-    mcp.run(transport='streamable-http')
+    mcp.run(transport='stdio')

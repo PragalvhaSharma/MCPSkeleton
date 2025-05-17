@@ -1,6 +1,5 @@
 {
     "mcpServers": {
-        
         "filesystem": {
             "command": "npx",
             "args": [
@@ -9,7 +8,6 @@
                 "/Users/pragalvhasharma/Downloads/PragGOToDocuments/Blanc/school/mcpServers/McpSkeleton/claudeDesktop"
             ]
         },
-        
         "research": {
             "command": "uv",
             "args": [
@@ -19,10 +17,17 @@
                 "research_server.py"
             ]
         },
-        
         "fetch": {
             "command": "uvx",
-            "args": ["mcp-server-fetch"]
+            "args": [
+                "mcp-server-fetch"
+            ]
+        },
+        "git": {
+            "command": "uvx",
+            "args": [
+                "mcp-server-git"
+            ]
         }
     }
 }
